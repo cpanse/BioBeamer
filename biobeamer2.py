@@ -256,6 +256,7 @@ def compare_files_destination(source_result_mapping):
     for file_to_copy, target_file in source_result_mapping.items():
         # tmp = os.path.exists(target_file)
         if not target_file is None:
+            print(target_file + "\n")
             if os.path.exists(target_file) and filecmp.cmp(file_to_copy, target_file):
                 copied[file_to_copy] = target_file
             else:
@@ -295,7 +296,9 @@ def remove_old_copied(source_result_mapping,
     '''
     if simulate:
         myfile = open(simulate, "w")
+        simulate_mode = True
     else:
+        simulate_mode = False
         myfile = False
 
     for file_to_copy in source_result_mapping:
@@ -310,11 +313,10 @@ def remove_old_copied(source_result_mapping,
                     logger.info(
                         "Simulating command : [rm {0}] since tf {1} > max_time {2}".format(file_to_copy, time_diff,
                                                                                            max_time_diff))
-                    myfile.write("rm {0}\n".format(file_to_copy))
+                    myfile.write("rm {f2c}\n".format(f2c=file_to_copy))
 
-    if myfile:
+    if simulate_mode and myfile:
         myfile.close()
-
 
 def compare_copied_with_log(not_copied, files_copied_old):
     new_not_copied = {}
@@ -324,7 +326,7 @@ def compare_copied_with_log(not_copied, files_copied_old):
     return new_not_copied
 
 
-def robocopy(bio_beamer_parser, logger):
+def robocopy(bio_beamer_parser, logger, biobeamerlog="./log/robocopy.log"):
     parameters = bio_beamer_parser.parameters
     regex = bio_beamer_parser.regex
 
@@ -335,7 +337,7 @@ def robocopy(bio_beamer_parser, logger):
         logger.error(error)
         raise FileNotFoundError(error)
 
-    files_copied_log = read_copied_files()  # added 02.2020
+    files_copied_log = read_copied_files(storage=parameters["copied_files_log"])  # added 02.2020
     files2copy = list(set(files2copy) - set(files_copied_log))  # remove all files which were already copied.
 
     files_filtered = filter_input_filelist(files2copy, regex, parameters, logger=logger)
@@ -368,11 +370,11 @@ def robocopy(bio_beamer_parser, logger):
         files_copied = robocopy_exec_map(not_copied,
                                          parameters["robocopy_mov"],
                                          logger,
-                                         logfile="./log/robocopy.log",
+                                         logfile=biobeamerlog,
                                          simulate=parameters['simulate_copy'])
 
         files_copied = set(list(all_copied) + files_copied)
-        log_copied_files(list(files_copied))  # added 02.2020
+        log_copied_files(list(files_copied), storage=parameters["copied_files_log"])  # added 02.2020
 
         # removes files which have been copied
         remove_old_copied(files_copied,
@@ -387,24 +389,33 @@ def robocopy(bio_beamer_parser, logger):
 
 
 if __name__ == "__main__":
-
     configuration_url = "file:///c:/FGCZ/BioBeamer"
-    if len(sys.argv) == 3:
+    biobeamer_xml = "BioBeamer2.xml"
+    if len(sys.argv) >= 3:
         configuration_url = sys.argv[1]
         password = sys.argv[2]
+    if len(sys.argv) == 4:
+        biobeamer_xml = sys.argv[3]
 
     biobeamer_xsd = "{0}/BioBeamer2.xsd".format(configuration_url)
-    biobeamer_xml = "{0}/BioBeamer2.xml".format(configuration_url)
+    biobeamer_xml_path = ("{0}/"+biobeamer_xml).format(configuration_url)
 
     host = socket.gethostname()
     logger = MyLog.MyLog()
     now = datetime.now().strftime("%Y%m%d_%H%M%S")  # current date and time
-    file = "log/biobeamer_{date}.log".format(date=now)
+    config_file_name = biobeamer_xml.replace('file://', '')
+
+    # Use os.path.basename to get the file name
+    config_file_name = os.path.basename(config_file_name)
+    config_file_name, file_extension = os.path.splitext(config_file_name)
+
+    file = "./log/biobeamer_{xml}_{date}.log".format(xml=config_file_name, date=now)
+    biobeamerlog = "./log/robocopy_{xml}.log".format(xml=config_file_name)
     logger.add_file(filename=file, level=logging.DEBUG)
     logger.logger.info("\n\n\nStarting new Biobeamer!")
     logger.logger.info("retrieving config from {} for hostname {}".format(biobeamer_xml, host))
 
-    bio_beamer_parser = BioBeamerParser.BioBeamerParser(biobeamer_xsd, biobeamer_xml, hostname=host,
+    bio_beamer_parser = BioBeamerParser.BioBeamerParser(biobeamer_xsd, biobeamer_xml_path, hostname=host,
                                                         logger=logger.logger)
     logger.add_syshandler(address=(bio_beamer_parser.parameters["syshandler_adress"],
                                    bio_beamer_parser.parameters["syshandler_port"]))
@@ -424,7 +435,7 @@ if __name__ == "__main__":
             logger.logger.error("Can't map network drive {}".format(bio_beamer_parser.parameters['target_path']))
             exit(0)
 
-    robocopy(bio_beamer_parser, logger.logger)
+    robocopy(bio_beamer_parser, logger.logger, biobeamerlog)
 
     if not drive == 0:
         drive.unmapDrive()
